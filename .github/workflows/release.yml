@@ -1,0 +1,71 @@
+name: Release
+
+# Релиз по тегу vX.Y.Z: собрать бинари под x86_64 и arm64, упаковать вместе
+# с расширением и выложить в GitHub Release. install.sh качает именно эти архивы.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goarch: amd64
+            label: x86_64
+          - goarch: arm64
+            label: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Сборка
+        env:
+          CGO_ENABLED: 0
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o dist/autoport ./cmd/autoport
+
+      # В архив кладём и расширение: install.sh скачивает один файл и раскладывает
+      # обе части, чтобы установка была в одну команду.
+      - name: Упаковка
+        run: |
+          cp -r extension dist/extension
+          cp install.sh dist/
+          tar -C dist -czf "autoport_${GITHUB_REF_NAME}_linux_${{ matrix.label }}.tar.gz" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: autoport-${{ matrix.label }}
+          path: "*.tar.gz"
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Контрольные суммы
+        run: sha256sum *.tar.gz > checksums.txt
+
+      - name: Публикация релиза
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            *.tar.gz checksums.txt
