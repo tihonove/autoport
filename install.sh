@@ -124,14 +124,19 @@ else
   NEXT=2
 fi
 
-echo
-bold "$NEXT. Порт 443 (только если пробрасываешь https-домены)"
-info "ssh под юзером не биндит порты ниже 1024. Разово, под root:"
-echo
-info "  echo 'net.ipv4.ip_unprivileged_port_start = 443' |"
-info "    sudo tee /etc/sysctl.d/50-autoport.conf && sudo sysctl --system"
-echo
-info "Побочка: 443–1023 станут доступны всем процессам машины."
+# Про 443 напоминаем, только если он и правда недоступен: у того, кто уже
+# настроил, лишний шаг в выводе выглядит как «ты что-то не доделал».
+UNPRIV=$(cat /proc/sys/net/ipv4/ip_unprivileged_port_start 2>/dev/null || echo 1024)
+if [ "$UNPRIV" -gt 443 ]; then
+  echo
+  bold "$NEXT. Порт 443 (только если пробрасываешь https-домены)"
+  info "ssh под юзером не биндит порты ниже $UNPRIV. Разово, под root:"
+  echo
+  info "  echo 'net.ipv4.ip_unprivileged_port_start = 443' |"
+  info "    sudo tee /etc/sysctl.d/50-autoport.conf && sudo sysctl --system"
+  echo
+  info "Побочка: 443–1023 станут доступны всем процессам машины."
+fi
 
 echo
 bold "Смотрелка: http://$ADDR/"
