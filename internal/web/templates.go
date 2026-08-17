@@ -10,12 +10,13 @@ import (
 )
 
 type pageData struct {
-	CSRF     string
-	Flash    string
-	OK       string
-	Forwards []fwd.Forward
-	Hosts    []sshconf.Host
-	AuthURLs map[string]string
+	CSRF      string
+	Flash     string
+	OK        string
+	Forwards  []fwd.Forward
+	Hosts     []sshconf.Host
+	AuthURLs  map[string]string
+	SSHConfig string
 
 	// только для /fix
 	Back     string
@@ -102,6 +103,13 @@ var tmpl = template.Must(template.New("").Funcs(funcs).Parse(`
 {{define "banners"}}
   {{with .Flash}}<div class="flash">{{.}}</div>{{end}}
   {{with .OK}}<div class="ok">{{.}}</div>{{end}}
+  {{if not .Hosts}}
+    <div class="auth">
+      В <code>{{.SSHConfig}}</code> нет ни одной подходящей записи <code>Host</code>,
+      поэтому пробрасывать некуда. autoport берёт машины только оттуда;
+      шаблоны вроде <code>Host *</code> не в счёт.
+    </div>
+  {{end}}
   {{range $host, $url := .AuthURLs}}
     <div class="auth">
       <b>{{$host}}</b> просит подтвердить сессию —

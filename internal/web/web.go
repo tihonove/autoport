@@ -55,11 +55,12 @@ func (s *Server) hosts() []sshconf.Host {
 
 func (s *Server) base(r *http.Request) pageData {
 	return pageData{
-		CSRF:     s.csrf,
-		Flash:    r.URL.Query().Get("err"),
-		OK:       r.URL.Query().Get("ok"),
-		Hosts:    s.hosts(),
-		AuthURLs: s.mgr.AuthURLs(),
+		CSRF:      s.csrf,
+		Flash:     r.URL.Query().Get("err"),
+		OK:        r.URL.Query().Get("ok"),
+		Hosts:     s.hosts(),
+		AuthURLs:  s.mgr.AuthURLs(),
+		SSHConfig: s.sshConfig,
 	}
 }
 

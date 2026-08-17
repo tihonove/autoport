@@ -40,7 +40,10 @@ jobs:
         run: |
           cp -r extension dist/extension
           cp install.sh dist/
-          tar -C dist -czf "autoport_${GITHUB_REF_NAME}_linux_${{ matrix.label }}.tar.gz" .
+          # Явно перечисляем содержимое, а не «.»: иначе в архив попадает запись
+          # про сам каталог, и распаковка в чужой каталог ругается на смену прав.
+          tar -C dist -czf "autoport_${GITHUB_REF_NAME}_linux_${{ matrix.label }}.tar.gz" \
+            autoport install.sh extension
 
       - uses: actions/upload-artifact@v4
         with:
