@@ -15,6 +15,8 @@ type pageData struct {
 	OK        string
 	Forwards  []fwd.Forward
 	Hosts     []sshconf.Host
+	Options   []hostOption
+	HasLast   bool
 	AuthURLs  map[string]string
 	SSHConfig string
 
@@ -24,6 +26,13 @@ type pageData struct {
 	FixHost  string
 	FixPort  int
 	Suggests []int
+}
+
+// hostOption — пункт выпадашки с хостами. Last стоит на том, который выбирали
+// в прошлый раз: он идёт первым и подставлен заранее.
+type hostOption struct {
+	Alias string
+	Last  bool
 }
 
 var funcs = template.FuncMap{
@@ -100,6 +109,14 @@ var tmpl = template.Must(template.New("").Funcs(funcs).Parse(`
 </style>
 {{end}}
 
+{{define "hostpicker"}}
+  <select name="host"{{if not $.HasLast}} autofocus{{end}}>
+    {{range .Options}}
+      <option value="{{.Alias}}"{{if .Last}} selected{{end}}>{{.Alias}}{{if .Last}} — прошлый раз{{end}}</option>
+    {{end}}
+  </select>
+{{end}}
+
 {{define "banners"}}
   {{with .Flash}}<div class="flash">{{.}}</div>{{end}}
   {{with .OK}}<div class="ok">{{.}}</div>{{end}}
@@ -154,7 +171,7 @@ var tmpl = template.Must(template.New("").Funcs(funcs).Parse(`
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   <div class="row">
     <label>локальный порт<input name="localPort" type="number" min="1" max="65535" required style="width:8rem"></label>
-    <label>хост<select name="host">{{range .Hosts}}<option>{{.Alias}}</option>{{end}}</select></label>
+    <label>хост{{template "hostpicker" .}}</label>
     <label>порт на той стороне<input name="remotePort" type="number" min="1" max="65535" placeholder="как локальный" style="width:11rem"></label>
     <label>насколько<select name="ttl">
       <option value="300">5 минут</option>
@@ -169,7 +186,7 @@ var tmpl = template.Must(template.New("").Funcs(funcs).Parse(`
 {{define "fix"}}
 {{template "head" "autoport — куда пробросить?"}}
 <h1>Страница не открылась</h1>
-<p class="sub">Выбери, куда пробросить порт — и вернёмся на неё же.</p>
+<p class="sub">{{if .HasLast}}Прошлый хост уже подставлен — Enter, и вернёмся на неё же.{{else}}Выбери, куда пробросить порт — и вернёмся на неё же.{{end}}</p>
 {{template "banners" .}}
 
 <dl>
@@ -184,14 +201,14 @@ var tmpl = template.Must(template.New("").Funcs(funcs).Parse(`
   <input type="hidden" name="back" value="{{.Back}}">
   <input type="hidden" name="localPort" value="{{.FixPort}}">
   <div class="row">
-    <label>хост<select name="host">{{range .Hosts}}<option>{{.Alias}}</option>{{end}}</select></label>
+    <label>хост{{template "hostpicker" .}}</label>
     <label>порт на той стороне<input name="remotePort" type="number" min="1" max="65535" value="{{.FixPort}}" style="width:11rem"></label>
     <label>насколько<select name="ttl">
       <option value="300">5 минут</option>
       <option value="3600" selected>1 час</option>
       <option value="0">навсегда</option>
     </select></label>
-    <button class="primary">Пробросить и вернуться</button>
+    <button class="primary"{{if .HasLast}} autofocus{{end}}>Пробросить и вернуться</button>
   </div>
 </form>
 

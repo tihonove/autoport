@@ -15,22 +15,24 @@ import (
 	"time"
 
 	"github.com/tihonove/autoport/internal/fwd"
+	"github.com/tihonove/autoport/internal/prefs"
 	"github.com/tihonove/autoport/internal/sshconf"
 )
 
 type Server struct {
 	mgr        *fwd.Manager
 	sshConfig  string
+	last       *prefs.Last
 	csrf       string
 	maxPortTTL time.Duration
 }
 
-func New(mgr *fwd.Manager, sshConfig string) *Server {
+func New(mgr *fwd.Manager, sshConfig string, last *prefs.Last) *Server {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		panic(err)
 	}
-	return &Server{mgr: mgr, sshConfig: sshConfig, csrf: hex.EncodeToString(b)}
+	return &Server{mgr: mgr, sshConfig: sshConfig, last: last, csrf: hex.EncodeToString(b)}
 }
 
 func (s *Server) Routes() *http.ServeMux {
@@ -54,14 +56,37 @@ func (s *Server) hosts() []sshconf.Host {
 }
 
 func (s *Server) base(r *http.Request) pageData {
+	hosts := s.hosts()
+	opts := hostOptions(hosts, s.last.Host())
 	return pageData{
 		CSRF:      s.csrf,
 		Flash:     r.URL.Query().Get("err"),
 		OK:        r.URL.Query().Get("ok"),
-		Hosts:     s.hosts(),
+		Hosts:     hosts,
+		Options:   opts,
+		HasLast:   len(opts) > 0 && opts[0].Last,
 		AuthURLs:  s.mgr.AuthURLs(),
 		SSHConfig: s.sshConfig,
 	}
+}
+
+// hostOptions ставит запомненный хост первым и помечает его выбранным, чтобы
+// на странице выбора хватало одного Enter. Запомненного нет или он исчез из
+// конфига — список остаётся как был, без предвыбора.
+func hostOptions(hosts []sshconf.Host, last string) []hostOption {
+	opts := make([]hostOption, 0, len(hosts))
+	found := false
+	for _, h := range hosts {
+		if h.Alias == last {
+			found = true
+			continue
+		}
+		opts = append(opts, hostOption{Alias: h.Alias})
+	}
+	if !found {
+		return opts
+	}
+	return append([]hostOption{{Alias: last, Last: true}}, opts...)
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, data pageData) {
@@ -179,6 +204,9 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		fail(err.Error())
 		return
 	}
+	// Запоминаем только удавшийся выбор: предлагать машину, на которую
+	// не пустило, смысла нет.
+	s.last.Set(host)
 
 	// Вернуться туда, откуда увело расширение. location.replace тут не нужен:
 	// 303 не оставляет страницу выбора в истории.

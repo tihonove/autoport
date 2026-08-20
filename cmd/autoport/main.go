@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/tihonove/autoport/internal/fwd"
+	"github.com/tihonove/autoport/internal/prefs"
 	"github.com/tihonove/autoport/internal/sshconf"
 	"github.com/tihonove/autoport/internal/web"
 )
@@ -26,13 +27,15 @@ const defaultAddr = "127.0.0.1:8777"
 func main() {
 	addr := flag.String("addr", defaultAddr, "адрес, который слушаем")
 	sshConfig := flag.String("ssh-config", sshconf.DefaultPath(), "путь к ~/.ssh/config")
+	lastHost := flag.String("last-host", prefs.DefaultPath(), "файл с последним выбранным хостом")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	mgr := fwd.New()
-	srv := &http.Server{Addr: *addr, Handler: web.New(mgr, *sshConfig).Routes()}
+	last := prefs.Load(*lastHost)
+	srv := &http.Server{Addr: *addr, Handler: web.New(mgr, *sshConfig, last).Routes()}
 
 	// Протухшие пробросы снимаем по таймеру: 10 секунд — достаточно точно
 	// для TTL в минутах и не создаёт заметного фона.
