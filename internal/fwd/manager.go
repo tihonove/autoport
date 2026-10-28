@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -30,6 +31,9 @@ type Forward struct {
 	RemotePort int       `json:"remotePort"`
 	Created    time.Time `json:"created"`
 	Expires    time.Time `json:"expires,omitzero"` // нулевое = навсегда
+	// Down — соединение под пробросом оборвалось, порт не слушается.
+	// Запись держим, чтобы восстановить проброс с теми же настройками.
+	Down bool `json:"down,omitempty"`
 }
 
 // Pinned — проброс без срока.
@@ -67,6 +71,11 @@ type Manager struct {
 	forwards map[string]*Forward
 	masters  map[string]*master
 	pending  map[string]authNote
+	closed   bool
+
+	// dialing — по замку на хост, чтобы два одновременных подъёма не делили
+	// один сокет: startMaster удаляет его перед стартом и снёс бы соседа.
+	dialing map[string]*sync.Mutex
 }
 
 func New() *Manager {
@@ -74,6 +83,7 @@ func New() *Manager {
 		forwards: make(map[string]*Forward),
 		masters:  make(map[string]*master),
 		pending:  make(map[string]authNote),
+		dialing:  make(map[string]*sync.Mutex),
 	}
 }
 
@@ -92,6 +102,20 @@ func newID() string {
 // просит подтвердить сессию, а всё остальное в это время должно работать.
 func (m *Manager) master(host string) (*master, error) {
 	m.mu.Lock()
+	dl, ok := m.dialing[host]
+	if !ok {
+		dl = &sync.Mutex{}
+		m.dialing[host] = dl
+	}
+	m.mu.Unlock()
+	dl.Lock()
+	defer dl.Unlock()
+
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("сервис останавливается")
+	}
 	ms, ok := m.masters[host]
 	m.mu.Unlock()
 
@@ -119,17 +143,65 @@ func (m *Manager) master(host string) (*master, error) {
 	m.masters[host] = ms
 	delete(m.pending, host) // поднялись — старая ссылка больше не нужна
 	m.mu.Unlock()
+	go m.watch(ms)
 	return ms, nil
+}
+
+// watch ждёт, пока ssh-мастер завершится. Если его погасили мы сами, в реестре
+// его к этому моменту уже нет. Если нет — он умер сам (сеть, сон, перезагрузка
+// той стороны). Пробросы с него не снимаем, а помечаем оборвавшимися: когда
+// человек снова упрётся в порт, страница выбора поднимет его с теми же
+// настройками, а не заставит вспоминать, куда он вёл.
+func (m *Manager) watch(ms *master) {
+	<-ms.done
+
+	m.mu.Lock()
+	if m.closed || m.masters[ms.host] != ms {
+		m.mu.Unlock()
+		return
+	}
+	delete(m.masters, ms.host)
+	n := 0
+	for _, f := range m.forwards {
+		if f.Host == ms.host {
+			f.Down = true
+			n++
+		}
+	}
+	m.mu.Unlock()
+
+	_ = os.Remove(ms.sock)
+	log.Printf("соединение с %s оборвалось, пробросов на нём: %d — восстановятся при следующем заходе", ms.host, n)
+}
+
+// Broken — оборвавшийся проброс на этом локальном порту, если он есть.
+func (m *Manager) Broken(localPort int) (Forward, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, f := range m.forwards {
+		if f.LocalPort == localPort && f.Down {
+			return *f, true
+		}
+	}
+	return Forward{}, false
 }
 
 // Add ставит проброс. ttl == 0 — навсегда.
 func (m *Manager) Add(host string, localPort, remotePort int, ttl time.Duration) (*Forward, error) {
 	m.mu.Lock()
-	for _, f := range m.forwards {
-		if f.LocalPort == localPort {
-			m.mu.Unlock()
-			return nil, fmt.Errorf("порт %d уже проброшен на %s", localPort, f.Host)
+	for id, f := range m.forwards {
+		if f.LocalPort != localPort {
+			continue
 		}
+		if f.Down {
+			// Соединение под ним умерло, порт не слушается — ставим заново,
+			// с тем, что выбрали сейчас.
+			log.Printf("порт %d висел на оборвавшемся %s, ставлю заново", localPort, f.Host)
+			delete(m.forwards, id)
+			continue
+		}
+		m.mu.Unlock()
+		return nil, fmt.Errorf("порт %d уже проброшен на %s", localPort, f.Host)
 	}
 	m.mu.Unlock()
 
@@ -292,6 +364,7 @@ func (m *Manager) Reap() {
 // Close гасит все соединения. Пробросы умирают вместе с сервисом — так задумано.
 func (m *Manager) Close() {
 	m.mu.Lock()
+	m.closed = true
 	masters := make([]*master, 0, len(m.masters))
 	for host, ms := range m.masters {
 		masters = append(masters, ms)

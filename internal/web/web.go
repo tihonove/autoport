@@ -147,8 +147,22 @@ func (s *Server) handleFix(w http.ResponseWriter, r *http.Request) {
 	data.FixHost = q.Get("host")
 	data.FixPort, _ = strconv.Atoi(q.Get("port"))
 
+	data.FixRemotePort = data.FixPort
+	data.FixTTL = 3600
+
 	if data.FixPort <= 0 || data.FixPort > 65535 {
 		data.Flash = "не понял, какой порт пробрасывать — открой смотрелку и заведи вручную"
+	} else if f, ok := s.mgr.Broken(data.FixPort); ok && sshconf.Known(data.Hosts, f.Host) {
+		// Порт уже был проброшен, но соединение под ним оборвалось. Человек
+		// пришёл туда же — значит, хочет то же самое: подставляем как было.
+		data.Restore = &f
+		data.Options = hostOptions(data.Hosts, f.Host)
+		data.HasLast = true
+		data.FixRemotePort = f.RemotePort
+		data.FixTTL = 0
+		if !f.Pinned() {
+			data.FixTTL = int(f.Expires.Sub(f.Created).Seconds())
+		}
 	}
 	s.render(w, "fix", data)
 }

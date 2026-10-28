@@ -52,7 +52,9 @@ func startMaster(host string) (*master, error) {
 	m.cmd = exec.Command("ssh",
 		"-N", "-M", "-S", sock,
 		"-o", "ExitOnForwardFailure=yes",
-		"-o", "ServerAliveInterval=30",
+		// Мёртвое соединение замечаем секунд за 30, дальше его помечает
+		// Manager.watch. С 30×3 проброс полторы минуты молча не работал.
+		"-o", "ServerAliveInterval=10",
 		"-o", "ServerAliveCountMax=3",
 		// Явно и намеренно: с ControlPersist ssh уходит в фон, родитель выходит
 		// с rc=0, и процесс становится неуправляемым. Уже наступали.

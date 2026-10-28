@@ -26,6 +26,12 @@ type pageData struct {
 	FixHost  string
 	FixPort  int
 	Suggests []int
+
+	// Подставляются в форму: по умолчанию — как локальный порт и час,
+	// при восстановлении — как было у оборвавшегося проброса.
+	FixRemotePort int
+	FixTTL        int // секунды, 0 = навсегда
+	Restore       *fwd.Forward
 }
 
 // hostOption — пункт выпадашки с хостами. Last стоит на том, который выбирали
@@ -83,6 +89,7 @@ var tmpl = template.Must(template.New("").Funcs(funcs).Parse(`
   td { padding: .5rem .6rem .5rem 0; border-bottom: 1px solid #8882;
        font-family: ui-monospace, monospace; }
   .empty { color: #888; font-style: italic; }
+  .down { color: #c60; font-family: system-ui, sans-serif; font-size: .85rem; }
   form.inline { display: inline; }
   button { font: inherit; padding: .25rem .7rem; border-radius: 5px;
            border: 1px solid #8886; background: transparent; cursor: pointer; }
@@ -151,7 +158,7 @@ var tmpl = template.Must(template.New("").Funcs(funcs).Parse(`
   {{range .Forwards}}
   <tr>
     <td><a href="{{.URL}}">{{.LocalPort}}</a></td>
-    <td>{{.Host}}:{{.RemotePort}}</td>
+    <td>{{.Host}}:{{.RemotePort}}{{if .Down}} <span class="down">связь оборвалась — зайди на порт, восстановлю</span>{{end}}</td>
     <td>{{left .}}</td>
     <td>{{since .Created}}</td>
     <td>
@@ -185,8 +192,14 @@ var tmpl = template.Must(template.New("").Funcs(funcs).Parse(`
 
 {{define "fix"}}
 {{template "head" "autoport — куда пробросить?"}}
+{{with .Restore}}
+<h1>Восстанавливаю проброс</h1>
+<p class="sub">Порт {{.LocalPort}} был проброшен на <b>{{.Host}}:{{.RemotePort}}</b>, но соединение оборвалось.
+Всё подставлено как было — Enter, и вернёмся на страницу.</p>
+{{else}}
 <h1>Страница не открылась</h1>
 <p class="sub">{{if .HasLast}}Прошлый хост уже подставлен — Enter, и вернёмся на неё же.{{else}}Выбери, куда пробросить порт — и вернёмся на неё же.{{end}}</p>
+{{end}}
 {{template "banners" .}}
 
 <dl>
@@ -195,20 +208,20 @@ var tmpl = template.Must(template.New("").Funcs(funcs).Parse(`
   <dt>Порт</dt><dd>{{.FixPort}}</dd>
 </dl>
 
-<h2>Пробросить {{.FixPort}} на</h2>
+<h2>{{if .Restore}}Восстановить{{else}}Пробросить{{end}} {{.FixPort}} на</h2>
 <form method="post" action="/api/forward">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   <input type="hidden" name="back" value="{{.Back}}">
   <input type="hidden" name="localPort" value="{{.FixPort}}">
   <div class="row">
     <label>хост{{template "hostpicker" .}}</label>
-    <label>порт на той стороне<input name="remotePort" type="number" min="1" max="65535" value="{{.FixPort}}" style="width:11rem"></label>
+    <label>порт на той стороне<input name="remotePort" type="number" min="1" max="65535" value="{{.FixRemotePort}}" style="width:11rem"></label>
     <label>насколько<select name="ttl">
-      <option value="300">5 минут</option>
-      <option value="3600" selected>1 час</option>
-      <option value="0">навсегда</option>
+      <option value="300"{{if eq .FixTTL 300}} selected{{end}}>5 минут</option>
+      <option value="3600"{{if eq .FixTTL 3600}} selected{{end}}>1 час</option>
+      <option value="0"{{if eq .FixTTL 0}} selected{{end}}>навсегда</option>
     </select></label>
-    <button class="primary"{{if .HasLast}} autofocus{{end}}>Пробросить и вернуться</button>
+    <button class="primary"{{if .HasLast}} autofocus{{end}}>{{if .Restore}}Восстановить{{else}}Пробросить{{end}} и вернуться</button>
   </div>
 </form>
 
